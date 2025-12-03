@@ -45,6 +45,9 @@ Keep F9 pressed while talking, the text will be inserted into the currently acti
 
 To access the settings or view the history, simply right-click on the icon in the taskbar.
 
+You can update the whispercpp provided in MistterWhisper by replacing dlls and exe with the latest prebuilt binaries ( https://github.com/ggml-org/whisper.cpp/releases/latest ).
+It can resolve driver compatibilty issue (RTX 50x0 or newer cards).
+
 # Linux and macOS versions
 
 MisterWhisper requires a Java runtime to be installed (version 8 or newer) to use *MisterWhisper.jar*.
