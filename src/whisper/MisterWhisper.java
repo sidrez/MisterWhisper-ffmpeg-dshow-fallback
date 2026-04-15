@@ -27,9 +27,12 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.text.SimpleDateFormat;
@@ -71,6 +74,8 @@ import com.github.kwhat.jnativehook.keyboard.NativeKeyListener;
 public class MisterWhisper implements NativeKeyListener {
 
     private static final int MIN_AUDIO_DATA_LENGTH = (int) (16000 * 2.1);
+    private static final String FFMPEG_AUDIO_DEVICE_ENV = "MISTERWHISPER_FFMPEG_DEVICE";
+    private static final String FFMPEG_BIN_ENV = "MISTERWHISPER_FFMPEG_BIN";
 
     private Preferences prefs;
 
@@ -640,11 +645,10 @@ public class MisterWhisper implements NativeKeyListener {
             final Mixer mixer = AudioSystem.getMixer(mixerInfo);
             final Line.Info[] targetLines = mixer.getTargetLineInfo();
 
-            Line.Info lInfo = null;
             for (Line.Info lineInfo : targetLines) {
                 if (lineInfo.getLineClass().getName().contains("TargetDataLine")) {
                     try {
-                        return (TargetDataLine) mixer.getLine(lInfo);
+                        return (TargetDataLine) mixer.getLine(lineInfo);
                     } catch (Exception e) {
                         e.printStackTrace();
                     }
@@ -802,6 +806,9 @@ public class MisterWhisper implements NativeKeyListener {
                                 System.out.println("Using previous audio device : " + previsouAudipDevice);
                             }
                             if (targetDataLine == null) {
+                                if (captureWithFfmpegFallback(action, audioDevice, previsouAudipDevice)) {
+                                    return;
+                                }
                                 JOptionPane.showMessageDialog(null, "Cannot find any input audio device");
                                 setRecording(false);
                                 return;
@@ -859,6 +866,9 @@ public class MisterWhisper implements NativeKeyListener {
 
                         } catch (LineUnavailableException e) {
                             System.out.println("Audio input device not available (used by an other process?)");
+                            if (captureWithFfmpegFallback(action, audioDevice, previsouAudipDevice)) {
+                                return;
+                            }
                         } catch (Exception e) {
                             e.printStackTrace();
                         } finally {
@@ -903,6 +913,133 @@ public class MisterWhisper implements NativeKeyListener {
             e.printStackTrace();
             JOptionPane.showMessageDialog(null, "Error starting recording: " + e.getMessage());
         }
+    }
+
+    private boolean captureWithFfmpegFallback(final Action action, String audioDevice, String previousAudioDevice) {
+        String device = System.getenv(FFMPEG_AUDIO_DEVICE_ENV);
+        if (device == null || device.isBlank()) {
+            device = this.prefs.get("ffmpeg.audio.device", "");
+        }
+        if (device == null || device.isBlank()) {
+            device = audioDevice;
+        }
+        if (device == null || device.isBlank()) {
+            device = previousAudioDevice;
+        }
+        if (device == null || device.isBlank()) {
+            device = findFirstDshowAudioDevice(getFfmpegBinary());
+        }
+        if (device == null || device.isBlank()) {
+            return false;
+        }
+        final String ffmpegBin = getFfmpegBinary();
+        final ProcessBuilder pb = new ProcessBuilder(ffmpegBin, "-hide_banner", "-loglevel", "warning", "-f", "dshow", "-i", "audio=" + device, "-ac", "1", "-ar", "16000", "-f", "s16le", "-");
+        pb.redirectErrorStream(false);
+        try {
+            final Process process = pb.start();
+            System.out.println("Using ffmpeg dshow fallback with device: " + device);
+            final Thread errThread = new Thread(() -> {
+                try (InputStream err = process.getErrorStream()) {
+                    byte[] b = new byte[1024];
+                    while (err.read(b) != -1) {
+                        // drain stderr so ffmpeg does not block
+                    }
+                } catch (IOException ex) {
+                    // ignore stderr drain errors
+                }
+            }, "ffmpeg-stderr-drain");
+            errThread.setDaemon(true);
+            errThread.start();
+
+            final ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+            try (InputStream in = process.getInputStream()) {
+                byte[] data = new byte[8000];
+                while (isRecording()) {
+                    int numBytesRead = in.read(data, 0, data.length);
+                    if (numBytesRead > 0) {
+                        byteArrayOutputStream.write(data, 0, numBytesRead);
+                    } else if (numBytesRead < 0) {
+                        break;
+                    }
+                }
+            } finally {
+                try {
+                    process.destroy();
+                    process.waitFor();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+
+            final byte[] audioData = byteArrayOutputStream.toByteArray();
+            setRecording(false);
+
+            MisterWhisper.this.executorService.execute(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        transcribe(audioData, action, true);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }
+            });
+            return true;
+        } catch (IOException e) {
+            System.out.println("ffmpeg fallback failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private String getFfmpegBinary() {
+        String ffmpegBin = System.getenv(FFMPEG_BIN_ENV);
+        if (ffmpegBin == null || ffmpegBin.isBlank()) {
+            ffmpegBin = this.prefs.get("ffmpeg.bin", "ffmpeg");
+        }
+        if (ffmpegBin == null || ffmpegBin.isBlank()) {
+            return "ffmpeg";
+        }
+        return ffmpegBin;
+    }
+
+    private String findFirstDshowAudioDevice(String ffmpegBin) {
+        final ProcessBuilder pb = new ProcessBuilder(ffmpegBin, "-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy");
+        pb.redirectErrorStream(true);
+        try {
+            final Process process = pb.start();
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                boolean inAudioSection = false;
+                String line;
+                while ((line = r.readLine()) != null) {
+                    if (line.contains("DirectShow audio devices")) {
+                        inAudioSection = true;
+                        continue;
+                    }
+                    if (!inAudioSection) {
+                        continue;
+                    }
+                    if (line.contains("DirectShow video devices")) {
+                        inAudioSection = false;
+                        continue;
+                    }
+                    int firstQuote = line.indexOf('"');
+                    int lastQuote = line.lastIndexOf('"');
+                    if (firstQuote >= 0 && lastQuote > firstQuote && !line.contains("Alternative name")) {
+                        String device = line.substring(firstQuote + 1, lastQuote).trim();
+                        if (!device.isEmpty()) {
+                            return device;
+                        }
+                    }
+                }
+            } finally {
+                process.destroy();
+            }
+        } catch (IOException e) {
+            if (this.debug) {
+                System.out.println("Cannot enumerate dshow devices via ffmpeg: " + e.getMessage());
+            }
+        }
+        return null;
     }
 
     public void transcribe(byte[] audioData, final Action action, boolean isEndOfCapture) throws IOException {
