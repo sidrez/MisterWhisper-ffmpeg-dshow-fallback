@@ -1,7 +1,7 @@
 # Build outputs
 /out/
 /dist/
-/release/
+/release/Продолжение следует...
 
 # Runtime/model artifacts (keep out of source repo)
 /models/

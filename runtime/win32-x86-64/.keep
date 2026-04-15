@@ -1,0 +1,2 @@
+Keep runtime DLLs in this folder for local testing.
+Use scripts/bootstrap-runtime-from-release.ps1 to populate it.

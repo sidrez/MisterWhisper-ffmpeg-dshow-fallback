@@ -79,6 +79,25 @@ On the local machine, add the remote url as first parameter :
 MisterWhisper.exe "http://192.168.1.100:9595/inference"
 ``
 
+# Windows local dev workflow (from repo only)
+
+To test without depending on a temporary release folder:
+
+1. Put native Whisper/CUDA DLLs into `runtime\win32-x86-64` (one-time):
+```
+powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap-runtime-from-release.ps1
+```
+
+2. Build from source and copy runtime DLLs into `out\win32-x86-64`:
+```
+powershell -ExecutionPolicy Bypass -File .\scripts\build-and-run.ps1
+```
+
+3. Run in debug mode:
+```
+java -cp "out;lib\jna.jar;lib\jnativehook-2.2.2.jar;lib\win32-x86-64.jar" whisper.MisterWhisper --window --debug
+```
+
 # Acknowledgements
 
 Georgi Gerganov : For its state-of-the-art, efficient [whisper.cpp](https://github.com/ggerganov/whisper.cpp). Demonstrating that we don't need an abundance of low-quality Python software for AI tools.
