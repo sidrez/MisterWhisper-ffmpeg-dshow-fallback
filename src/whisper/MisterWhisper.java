@@ -25,6 +25,7 @@ import java.awt.event.ItemListener;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.BufferedReader;
@@ -35,6 +36,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -208,9 +210,18 @@ public class MisterWhisper implements NativeKeyListener {
     }
 
     void createTrayIcon() {
-        this.imageRecording = new ImageIcon(this.getClass().getResource("recording.png")).getImage();
-        this.imageInactive = new ImageIcon(this.getClass().getResource("inactive.png")).getImage();
-        this.imageTranscribing = new ImageIcon(this.getClass().getResource("transcribing.png")).getImage();
+        this.imageRecording = loadTrayIconImage("recording.png");
+        this.imageInactive = loadTrayIconImage("inactive.png");
+        this.imageTranscribing = loadTrayIconImage("transcribing.png");
+        if (this.imageInactive == null) {
+            this.imageInactive = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
+        }
+        if (this.imageRecording == null) {
+            this.imageRecording = this.imageInactive;
+        }
+        if (this.imageTranscribing == null) {
+            this.imageTranscribing = this.imageInactive;
+        }
 
         this.trayIcon = new TrayIcon(this.imageInactive, "Press " + this.hotkey + " to record");
         this.trayIcon.setImageAutoSize(true);
@@ -238,6 +249,29 @@ public class MisterWhisper implements NativeKeyListener {
             System.out.println("TrayIcon could not be added.\n" + ex.getMessage());
         }
 
+    }
+
+    private Image loadTrayIconImage(String name) {
+        URL location = this.getClass().getResource(name);
+        if (location == null) {
+            location = this.getClass().getResource("/whisper/" + name);
+        }
+        if (location != null) {
+            return new ImageIcon(location).getImage();
+        }
+
+        File fromOut = new File("out\\whisper", name);
+        if (fromOut.isFile()) {
+            return new ImageIcon(fromOut.getAbsolutePath()).getImage();
+        }
+
+        File fromSrc = new File("src\\whisper", name);
+        if (fromSrc.isFile()) {
+            return new ImageIcon(fromSrc.getAbsolutePath()).getImage();
+        }
+
+        System.out.println("Tray icon not found: " + name);
+        return null;
     }
 
     protected PopupMenu createPopupMenu() {
@@ -675,7 +709,7 @@ public class MisterWhisper implements NativeKeyListener {
                     lInfo = lineInfo;
                     if (mixerInfo.getName().equals(audioDevice)) {
                         try {
-                            return (TargetDataLine) mixer.getLine(lInfo);
+                            return (TargetDataLine) mixer.getLine(lineInfo);
                         } catch (Exception e) {
                             e.printStackTrace();
                         }
