@@ -1,0 +1,23 @@
+# Build outputs
+/out/
+/dist/
+/release/
+
+# Runtime/model artifacts (keep out of source repo)
+/models/
+
+# Native/binary artifacts
+*.dll
+*.exe
+*.pdb
+
+# Java build/log/temp files
+*.class
+*.log
+hs_err_pid*
+replay_pid*
+
+# OS/editor temp files
+.DS_Store
+Thumbs.db
+*.tmp
