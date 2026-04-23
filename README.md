@@ -79,23 +79,84 @@ On the local machine, add the remote url as first parameter :
 MisterWhisper.exe "http://192.168.1.100:9595/inference"
 ``
 
-# Windows local dev workflow (from repo only)
+# Windows local dev workflow (from repo only, no `.exe`)
 
-To test without depending on a temporary release folder:
+Use this when you run directly from Java classes (for example with a PowerShell `mw` function), not from a packaged executable.
 
-1. Put native Whisper/CUDA DLLs into `runtime\win32-x86-64` (one-time):
+## 1) Where to get Whisper/CUDA DLLs
+
+Put native DLLs into `runtime\win32-x86-64`.
+
+Recommended source:
+- Extract the **Windows CUDA** release archive (`MisterWhisper-*-windows-cuda.zip`) and use that folder as source for:
+  - `whisper.dll`
+  - `ggml.dll`
+  - `ggml-base.dll`
+  - `ggml-cpu.dll`
+  - `ggml-cuda.dll`
+  - `cudart64_110.dll`
+  - `cublas64_11.dll`
+  - `cublasLt64_11.dll`
+
+Bootstrap from that extracted release folder:
 ```
-powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap-runtime-from-release.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap-runtime-from-release.ps1 -ReleasePath "C:\path\to\MisterWhisper-1.3-windows-cuda"
 ```
 
-2. Build from source and copy runtime DLLs into `out\win32-x86-64`:
+Notes:
+- If `-ReleasePath` is omitted, script uses its default temp path.
+- You can also replace these DLLs with newer compatible `whisper.cpp` prebuilt Windows binaries if needed.
+
+## 2) Build from source and stage runtime DLLs
+
 ```
 powershell -ExecutionPolicy Bypass -File .\scripts\build-and-run.ps1
 ```
 
-3. Run in debug mode:
+This compiles Java sources into `out\` and copies runtime DLLs into `out\win32-x86-64`.
+
+## 3) Run
+
+Direct Java command:
 ```
 java -cp "out;lib\jna.jar;lib\jnativehook-2.2.2.jar;lib\win32-x86-64.jar" whisper.MisterWhisper --window --debug
+```
+
+Or via PowerShell helper function `mw`:
+```powershell
+function mw {
+    Set-Location "c:\Users\ar.sitdikov\OneDrive - ООО УК Унистрой\Work\Soft\Автоматизация\Python\Разное\Apps\MisterWhisper-ffmpeg-dshow-fallback"
+    java -cp "out;lib\jna.jar;lib\jnativehook-2.2.2.jar;lib\win32-x86-64.jar" whisper.MisterWhisper --window --debug
+}
+```
+
+Then run:
+```powershell
+mw
+```
+
+## Optional: save `mw` in PowerShell profile
+
+To make `mw` available in every new PowerShell session:
+
+```powershell
+if (!(Test-Path -LiteralPath $PROFILE)) { New-Item -ItemType File -Path $PROFILE -Force | Out-Null }
+notepad $PROFILE
+```
+
+Add:
+
+```powershell
+function mw {
+    Set-Location "c:\Users\ar.sitdikov\OneDrive - ООО УК Унистрой\Work\Soft\Автоматизация\Python\Разное\Apps\MisterWhisper-ffmpeg-dshow-fallback"
+    java -cp "out;lib\jna.jar;lib\jnativehook-2.2.2.jar;lib\win32-x86-64.jar" whisper.MisterWhisper --window --debug
+}
+```
+
+Restart PowerShell (or run `. $PROFILE`) and use:
+
+```powershell
+mw
 ```
 
 # Acknowledgements
