@@ -31,7 +31,8 @@ New-Item -ItemType Directory -Force -Path $outRuntimeDir | Out-Null
 New-Item -ItemType Directory -Force -Path $outWhisperDir | Out-Null
 Copy-Item -LiteralPath (Join-Path $runtimeDir "*.dll") -Destination $outRuntimeDir -Force
 # Needed for tray icon loading when running from classes in out/
-Copy-Item -LiteralPath (Join-Path $repoRoot "src\whisper\*.png") -Destination $outWhisperDir -Force
+Copy-Item -Path (Join-Path $repoRoot "src\whisper\*.png") -Destination $outWhisperDir -Force
+Copy-Item -Path (Join-Path $repoRoot "src\whisper\*.txt") -Destination $outWhisperDir -Force
 
 $sources = Get-ChildItem -Path "src" -Recurse -Filter "*.java" -File |
     Where-Object { $_.Name -notmatch '(?i)copy|копия' -and $_.BaseName -notmatch '\s' } |

@@ -69,6 +69,7 @@ import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 
 import com.github.kwhat.jnativehook.GlobalScreen;
+import com.github.kwhat.jnativehook.NativeInputEvent;
 import com.github.kwhat.jnativehook.NativeHookException;
 import com.github.kwhat.jnativehook.keyboard.NativeKeyEvent;
 import com.github.kwhat.jnativehook.keyboard.NativeKeyListener;
@@ -78,8 +79,12 @@ public class MisterWhisper implements NativeKeyListener {
     private static final int MIN_AUDIO_DATA_LENGTH = (int) (16000 * 2.1);
     private static final String FFMPEG_AUDIO_DEVICE_ENV = "MISTERWHISPER_FFMPEG_DEVICE";
     private static final String FFMPEG_BIN_ENV = "MISTERWHISPER_FFMPEG_BIN";
+    private static final String POST_PROCESSING_ENABLED_PREF = "post-processing.enabled";
+    private static final String PRE_PROCESSING_ENABLED_PREF_LEGACY = "pre-processing.enabled";
+    private static final long HOTKEY_REPEAT_SUPPRESS_MS = 150;
 
     private Preferences prefs;
+    private final MistralTextPostProcessor textPostProcessor = new MistralTextPostProcessor();
 
     // Whisper
     private LocalWhisperCPP w;
@@ -111,6 +116,7 @@ public class MisterWhisper implements NativeKeyListener {
     private boolean ctrltHotkey;
     private long recordingStartTime = 0;
     private boolean hotkeyPressed;
+    private long lastHotkeyReleaseTime;
     // Trigger mode
     private static final String START_STOP = "start_stop";
     private static final String PUSH_TO_TALK_DOUBLE_TAP = "push_to_talk_double_tap";
@@ -143,6 +149,7 @@ public class MisterWhisper implements NativeKeyListener {
         this.shiftHotkey = this.prefs.getBoolean("shift-hotkey", false);
         this.ctrltHotkey = this.prefs.getBoolean("ctrl-hotkey", false);
         this.model = this.prefs.get("model", "ggml-large-v3-turbo-q8_0.bin");
+        migratePostProcessingPreference();
 
         GlobalScreen.registerNativeHook();
         GlobalScreen.addNativeKeyListener(this);
@@ -330,6 +337,24 @@ public class MisterWhisper implements NativeKeyListener {
             }
         });
         popup.add(detectSilece);
+
+        CheckboxMenuItem postProcessing = new CheckboxMenuItem("Post-processing");
+        postProcessing.setState(this.prefs.getBoolean(POST_PROCESSING_ENABLED_PREF, false));
+        postProcessing.addItemListener(new ItemListener() {
+
+            @Override
+            public void itemStateChanged(ItemEvent e) {
+                MisterWhisper.this.prefs.putBoolean(POST_PROCESSING_ENABLED_PREF, postProcessing.getState());
+                try {
+                    MisterWhisper.this.prefs.sync();
+                } catch (BackingStoreException e1) {
+                    e1.printStackTrace();
+                    JOptionPane.showMessageDialog(null, "Cannot save preferences\n" + e1.getMessage());
+                }
+            }
+        });
+        popup.add(postProcessing);
+
         Menu hotkeysMenu = new Menu("Keyboard shortcut");
         // Shift hotkey modifier
         final CheckboxMenuItem shiftHotkeyMenuItem = new CheckboxMenuItem("SHIFT");
@@ -723,88 +748,112 @@ public class MisterWhisper implements NativeKeyListener {
 
     @Override
     public void nativeKeyPressed(NativeKeyEvent e) {
-        if (this.hotkeyPressed) {
+        if (!isConfiguredHotkey(e)) {
             return;
         }
-        int modifier = 0;
-        if (this.shiftHotkey) {
-            modifier += 1;
-        }
-        if (this.ctrltHotkey) {
-            modifier += 2;
-        }
-        if (e.getModifiers() != modifier) {
+        if (!hotkeyModifiersMatch(e)) {
+            if (this.debug) {
+                System.out.println("Hotkey press ignored due to modifiers: " + NativeInputEvent.getModifiersText(e.getModifiers()) + " (" + e.getModifiers() + ")");
+            }
             return;
         }
+        handleHotkeyPressed();
+
+    }
+
+    private boolean isConfiguredHotkey(NativeKeyEvent e) {
         final int length = MisterWhisper.ALLOWED_HOTKEYS_CODE.length;
         for (int i = 0; i < length; i++) {
             if (MisterWhisper.ALLOWED_HOTKEYS_CODE[i] == e.getKeyCode() && this.hotkey.equals(MisterWhisper.ALLOWED_HOTKEYS[i])) {
-                this.hotkeyPressed = true;
-
-                SwingUtilities.invokeLater(new Runnable() {
-
-                    @Override
-                    public void run() {
-                        final String strAction = MisterWhisper.this.prefs.get("action", "paste");
-                        Action action = Action.NOTHING;
-                        if (strAction.equals("paste")) {
-                            action = Action.COPY_TO_CLIPBOARD_AND_PASTE;
-                        } else if (strAction.equals("type")) {
-                            action = Action.TYPE_STRING;
-                        }
-
-                        if (!isRecording()) {
-                            MisterWhisper.this.recordingStartTime = System.currentTimeMillis();
-                            startRecording(action);
-                        } else {
-                            stopRecording();
-                        }
-                    }
-                });
-                break;
+                return true;
             }
         }
+        return false;
+    }
 
+    private boolean hotkeyModifiersMatch(NativeKeyEvent e) {
+        int modifiers = e.getModifiers();
+        boolean shiftPressed = (modifiers & NativeInputEvent.SHIFT_MASK) != 0;
+        boolean ctrlPressed = (modifiers & NativeInputEvent.CTRL_MASK) != 0;
+        return shiftPressed == this.shiftHotkey && ctrlPressed == this.ctrltHotkey;
     }
 
     @Override
     public void nativeKeyReleased(NativeKeyEvent e) {
-        int modifier = 0;
-        if (this.shiftHotkey) {
-            modifier += 1;
+        if (!isConfiguredHotkey(e)) {
+            return;
         }
-        if (this.ctrltHotkey) {
-            modifier += 2;
+        handleHotkeyReleased();
+
+    }
+
+    private synchronized void handleHotkeyPressed() {
+        long now = System.currentTimeMillis();
+        if (this.hotkeyPressed) {
+            return;
         }
-        if (e.getModifiers() != modifier) {
+        if (now - this.lastHotkeyReleaseTime < HOTKEY_REPEAT_SUPPRESS_MS) {
+            if (this.debug) {
+                System.out.println("Hotkey press ignored as repeat: " + this.hotkey);
+            }
             return;
         }
 
-        final int length = MisterWhisper.ALLOWED_HOTKEYS_CODE.length;
-        for (int i = 0; i < length; i++) {
-            if (MisterWhisper.ALLOWED_HOTKEYS_CODE[i] == e.getKeyCode() && this.hotkey.equals(MisterWhisper.ALLOWED_HOTKEYS[i])) {
-                this.hotkeyPressed = false;
-
-                SwingUtilities.invokeLater(new Runnable() {
-
-                    @Override
-                    public void run() {
-
-                        String currentMode = MisterWhisper.this.prefs.get("trigger-mode", PUSH_TO_TALK);
-                        if (currentMode.equals(PUSH_TO_TALK)) {
-                            stopRecording();
-                        } else if (currentMode.equals(PUSH_TO_TALK_DOUBLE_TAP)) {
-                            long delta = System.currentTimeMillis() - MisterWhisper.this.recordingStartTime;
-                            if (delta > 300) {
-                                stopRecording();
-                            }
-                        }
-                    }
-                });
-                break;
-            }
+        this.hotkeyPressed = true;
+        if (this.debug) {
+            System.out.println("Hotkey pressed: " + this.hotkey);
         }
 
+        String currentMode = this.prefs.get("trigger-mode", PUSH_TO_TALK);
+        if (currentMode.equals(PUSH_TO_TALK)) {
+            if (!isRecording()) {
+                this.recordingStartTime = now;
+                startRecording(getActionFromPrefs());
+            }
+        } else {
+            if (!isRecording()) {
+                this.recordingStartTime = now;
+                startRecording(getActionFromPrefs());
+            } else {
+                stopRecording();
+            }
+        }
+    }
+
+    private synchronized void handleHotkeyReleased() {
+        long now = System.currentTimeMillis();
+        if (!this.hotkeyPressed) {
+            if (this.debug) {
+                System.out.println("Hotkey release ignored as duplicate: " + this.hotkey);
+            }
+            return;
+        }
+
+        this.hotkeyPressed = false;
+        this.lastHotkeyReleaseTime = now;
+        if (this.debug) {
+            System.out.println("Hotkey released: " + this.hotkey);
+        }
+
+        String currentMode = this.prefs.get("trigger-mode", PUSH_TO_TALK);
+        if (currentMode.equals(PUSH_TO_TALK)) {
+            stopRecording();
+        } else if (currentMode.equals(PUSH_TO_TALK_DOUBLE_TAP)) {
+            long delta = now - this.recordingStartTime;
+            if (delta > 300) {
+                stopRecording();
+            }
+        }
+    }
+
+    private Action getActionFromPrefs() {
+        final String strAction = this.prefs.get("action", "paste");
+        if (strAction.equals("paste")) {
+            return Action.COPY_TO_CLIPBOARD_AND_PASTE;
+        } else if (strAction.equals("type")) {
+            return Action.TYPE_STRING;
+        }
+        return Action.NOTHING;
     }
 
     @Override
@@ -813,12 +862,12 @@ public class MisterWhisper implements NativeKeyListener {
     }
 
     private void startRecording(Action action) {
-        System.out.println("MisterWhisper.startRecording()" + action);
         if (isRecording()) {
             // Prevent multiple recordings
             return;
         }
 
+        System.out.println("MisterWhisper.startRecording()" + action);
         setRecording(true);
         try {
             String audioDevice = this.prefs.get("audio.device", "");
@@ -1126,6 +1175,19 @@ public class MisterWhisper implements NativeKeyListener {
         if (str.endsWith(suffix)) {
             str = str.substring(0, str.length() - suffix.length());
         }
+        str = str.trim();
+
+        if (this.prefs.getBoolean(POST_PROCESSING_ENABLED_PREF, false)) {
+            if (this.debug) {
+                System.out.println("Post-processing enabled");
+                System.out.println("Post-processing input: " + str);
+            }
+            str = this.textPostProcessor.postProcess(str, this.debug);
+            str = str.replace('\n', ' ');
+            str = str.replace('\r', ' ');
+            str = str.replace('\t', ' ');
+            str = str.trim();
+        }
 
         if (!isEndOfCapture) {
             str += " ";
@@ -1210,6 +1272,24 @@ public class MisterWhisper implements NativeKeyListener {
 
         setTranscribing(false);
 
+    }
+
+    private void migratePostProcessingPreference() {
+        if (this.prefs.get(POST_PROCESSING_ENABLED_PREF, null) != null) {
+            return;
+        }
+        if (this.prefs.get(PRE_PROCESSING_ENABLED_PREF_LEGACY, null) == null) {
+            return;
+        }
+
+        boolean legacyValue = this.prefs.getBoolean(PRE_PROCESSING_ENABLED_PREF_LEGACY, false);
+        this.prefs.putBoolean(POST_PROCESSING_ENABLED_PREF, legacyValue);
+        this.prefs.remove(PRE_PROCESSING_ENABLED_PREF_LEGACY);
+        try {
+            this.prefs.sync();
+        } catch (BackingStoreException e) {
+            e.printStackTrace();
+        }
     }
 
     protected synchronized void setTranscribing(boolean b) {
@@ -1384,8 +1464,8 @@ public class MisterWhisper implements NativeKeyListener {
     private void openWindow() {
         this.window = new JFrame("MisterWhisper");
         this.window.setIconImage(this.imageInactive);
-        this.window.setFocusable(false);
-        this.window.setFocusableWindowState(false);
+        this.window.setFocusable(true);
+        this.window.setFocusableWindowState(true);
         JPanel p = new JPanel();
         p.setLayout(new FlowLayout(FlowLayout.RIGHT));
         p.add(this.label);
