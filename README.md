@@ -18,7 +18,7 @@ MisterWhisper supports over 100 languages, making it a robust multilingual trans
 
 - Local or remote : You can use the included Whisper transcription locally or connect to a remote service for transcription.
 
-- Optional Mistral text post-processing: Enable **Post-processing** in the tray menu to correct spelling, punctuation and obvious typos before text is pasted, typed and stored in history.
+- Optional OpenRouter / DeepSeek text post-processing: Enable **Post-processing** in the tray menu to correct spelling, punctuation and obvious typos before text is pasted, typed and stored in history.
 
 # Usage
 
@@ -47,15 +47,17 @@ Keep F9 pressed while talking, the text will be inserted into the currently acti
 
 To access the settings or view the history, simply right-click on the icon in the taskbar.
 
-## Optional text post-processing with Mistral
+## Optional text post-processing with OpenRouter / DeepSeek
 
-MisterWhisper can run recognized text through Mistral after Whisper transcription and before paste/type/history.
+MisterWhisper can run recognized text through OpenRouter after Whisper transcription and before paste/type/history. The default model is `deepseek/deepseek-v4.1-flash`.
 
-1. Set the API key in the environment variable `MISTRAL_API_KEY`.
-2. Start MisterWhisper.
-3. Right-click the tray icon and enable `Post-processing`.
+1. Copy `.env.example` to `.env` if `.env` does not exist.
+2. Put your OpenRouter key into `OPENROUTER_API_KEY` in `.env`.
+3. Optionally change `OPENROUTER_MODEL` in `.env`.
+4. Start MisterWhisper.
+5. Right-click the tray icon and enable `Post-processing`.
 
-The setting is saved in Preferences and restored on startup. If the API key is missing, the network request fails, the API returns an error, or the response cannot be parsed, MisterWhisper keeps using the original Whisper text.
+The app first checks system environment variables and then the project `.env` file. Reasoning is disabled for the proofreading request. The setting is saved in Preferences and restored on startup. If the API key is missing, the network request fails, the API returns an error, or the response cannot be parsed, MisterWhisper keeps using the original Whisper text.
 
 You can update the whispercpp provided in MistterWhisper by replacing dlls and exe with the latest prebuilt binaries ( https://github.com/ggml-org/whisper.cpp/releases/latest ).
 It can resolve driver compatibilty issue (RTX 50x0 or newer cards).

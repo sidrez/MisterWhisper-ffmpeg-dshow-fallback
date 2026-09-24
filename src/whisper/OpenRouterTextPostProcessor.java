@@ -17,15 +17,16 @@ import org.json.JSONArray;
 import org.json.JSON;
 import org.json.JSONObject;
 
-public class MistralTextPostProcessor {
-    private static final String API_KEY_ENV = "MISTRAL_API_KEY";
-    private static final String BASE_URL = "https://api.mistral.ai/v1/";
+public class OpenRouterTextPostProcessor {
+    private static final String API_KEY_ENV = "OPENROUTER_API_KEY";
+    private static final String MODEL_ENV = "OPENROUTER_MODEL";
+    private static final String DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
+    private static final String BASE_URL = "https://openrouter.ai/api/v1/";
     private static final String CHAT_COMPLETIONS_PATH = "chat/completions";
-    private static final String MODEL = "mistral-small-2603";
     private static final int CONNECT_TIMEOUT_MS = 10000;
     private static final int READ_TIMEOUT_MS = 30000;
-    private static final String PROMPT_RESOURCE = "/whisper/mistral-post-processing-prompt.txt";
-    private static final String PROMPT_FILE = "src/whisper/mistral-post-processing-prompt.txt";
+    private static final String PROMPT_RESOURCE = "/whisper/openrouter-post-processing-prompt.txt";
+    private static final String PROMPT_FILE = "src/whisper/openrouter-post-processing-prompt.txt";
     private static final String FINAL_TEXT_OPEN_TAG = "<final-text>";
     private static final String FINAL_TEXT_CLOSE_TAG = "</final-text>";
 
@@ -33,7 +34,7 @@ public class MistralTextPostProcessor {
     private String promptSource = "unknown";
     private boolean missingApiKeyWarned;
 
-    public MistralTextPostProcessor() {
+    public OpenRouterTextPostProcessor() {
         this.prompt = loadPrompt();
     }
 
@@ -42,7 +43,7 @@ public class MistralTextPostProcessor {
             return text;
         }
 
-        String apiKey = System.getenv(API_KEY_ENV);
+        String apiKey = getConfigValue(API_KEY_ENV, null);
         if (apiKey == null || apiKey.isBlank()) {
             if (!this.missingApiKeyWarned) {
                 Logger.getGlobal().warning(API_KEY_ENV + " is not set; skipping Post-processing");
@@ -53,7 +54,8 @@ public class MistralTextPostProcessor {
 
         try {
             if (debug) {
-                System.out.println("Mistral Post-processing prompt source: " + this.promptSource);
+                System.out.println("OpenRouter Post-processing prompt source: " + this.promptSource
+                        + "; model=" + getConfigValue(MODEL_ENV, DEFAULT_MODEL));
             }
             long startedAt = System.currentTimeMillis();
             String processed;
@@ -61,25 +63,25 @@ public class MistralTextPostProcessor {
                 processed = request(text, apiKey);
             } catch (SocketTimeoutException ex) {
                 if (debug) {
-                    System.out.println("Mistral Post-processing timed out; retrying once");
+                    System.out.println("OpenRouter Post-processing timed out; retrying once");
                 }
                 processed = request(text, apiKey);
             }
             long elapsed = System.currentTimeMillis() - startedAt;
             if (processed == null || processed.trim().isEmpty()) {
                 if (debug) {
-                    System.out.println("Mistral Post-processing returned empty text; using original text");
+                    System.out.println("OpenRouter Post-processing returned empty text; using original text");
                 }
                 return text;
             }
             if (debug) {
-                System.out.println("Mistral Post-processing completed in " + elapsed + " ms; changed=" + !text.equals(processed.trim()));
-                System.out.println("Mistral Post-processing result: " + processed.trim());
+                System.out.println("OpenRouter Post-processing completed in " + elapsed + " ms; changed=" + !text.equals(processed.trim()));
+                System.out.println("OpenRouter Post-processing result: " + processed.trim());
             }
             return processed.trim();
         } catch (Exception ex) {
             if (debug) {
-                System.out.println("Mistral Post-processing failed; using original text: " + ex.getMessage());
+                System.out.println("OpenRouter Post-processing failed; using original text: " + ex.getMessage());
             }
             return text;
         }
@@ -108,7 +110,7 @@ public class MistralTextPostProcessor {
             InputStream responseStream = responseCode >= 400 ? connection.getErrorStream() : connection.getInputStream();
             String response = readResponse(responseStream);
             if (responseCode >= 400) {
-                throw new IOException("Mistral API returned HTTP " + responseCode + ": " + response);
+                throw new IOException("OpenRouter API returned HTTP " + responseCode + ": " + response);
             }
             return extractFinalText(response);
         } finally {
@@ -120,8 +122,12 @@ public class MistralTextPostProcessor {
 
     private String createPayload(String text) {
         JSONObject request = new JSONObject();
-        request.put("model", MODEL);
+        request.put("model", getConfigValue(MODEL_ENV, DEFAULT_MODEL));
         request.put("temperature", 0);
+
+        JSONObject reasoning = new JSONObject();
+        reasoning.put("enabled", false);
+        request.put("reasoning", reasoning);
 
         JSONArray messages = new JSONArray();
 
@@ -143,17 +149,17 @@ public class MistralTextPostProcessor {
         JSONObject obj = (JSONObject) JSON.parse(response);
         JSONArray choices = obj.optJSONArray("choices");
         if (choices == null || choices.size() == 0) {
-            throw new IllegalStateException("Mistral response has no choices");
+            throw new IllegalStateException("OpenRouter response has no choices");
         }
 
         JSONObject firstChoice = choices.optJSONObject(0);
         if (firstChoice == null) {
-            throw new IllegalStateException("Mistral response choice is not an object");
+            throw new IllegalStateException("OpenRouter response choice is not an object");
         }
 
         JSONObject message = firstChoice.optJSONObject("message");
         if (message == null) {
-            throw new IllegalStateException("Mistral response choice has no message");
+            throw new IllegalStateException("OpenRouter response choice has no message");
         }
 
         String content = message.optString("content", "").trim();
@@ -186,6 +192,56 @@ public class MistralTextPostProcessor {
         }
     }
 
+    private String getConfigValue(String name, String defaultValue) {
+        String value = System.getenv(name);
+        if (value != null && !value.isBlank()) {
+            return value.trim();
+        }
+
+        value = readDotEnvValue(name);
+        if (value != null && !value.isBlank()) {
+            return value.trim();
+        }
+        return defaultValue;
+    }
+
+    private String readDotEnvValue(String name) {
+        File envFile = new File(".env");
+        if (!envFile.isFile()) {
+            return null;
+        }
+
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(new FileInputStream(envFile), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                line = line.trim();
+                if (line.startsWith("\uFEFF")) {
+                    line = line.substring(1).trim();
+                }
+                if (line.isEmpty() || line.startsWith("#")) {
+                    continue;
+                }
+
+                int equals = line.indexOf('=');
+                if (equals <= 0 || !name.equals(line.substring(0, equals).trim())) {
+                    continue;
+                }
+
+                String value = line.substring(equals + 1).trim();
+                if (value.length() >= 2
+                        && ((value.startsWith("\"") && value.endsWith("\""))
+                                || (value.startsWith("'") && value.endsWith("'")))) {
+                    value = value.substring(1, value.length() - 1);
+                }
+                return value;
+            }
+        } catch (IOException e) {
+            Logger.getGlobal().warning("Cannot read .env: " + e.getMessage());
+        }
+        return null;
+    }
+
     private String loadPrompt() {
         File promptFile = new File(PROMPT_FILE);
         if (promptFile.isFile()) {
@@ -193,7 +249,7 @@ public class MistralTextPostProcessor {
                 this.promptSource = promptFile.getAbsolutePath();
                 return readResponse(in).trim();
             } catch (IOException e) {
-                Logger.getGlobal().warning("Cannot read Mistral prompt file: " + e.getMessage());
+                Logger.getGlobal().warning("Cannot read OpenRouter prompt file: " + e.getMessage());
             }
         }
 
@@ -203,10 +259,10 @@ public class MistralTextPostProcessor {
                 return readResponse(in).trim();
             }
         } catch (IOException e) {
-            Logger.getGlobal().warning("Cannot read Mistral prompt resource: " + e.getMessage());
+            Logger.getGlobal().warning("Cannot read OpenRouter prompt resource: " + e.getMessage());
         }
 
-        Logger.getGlobal().warning("Mistral prompt file not found; using built-in fallback prompt");
+        Logger.getGlobal().warning("OpenRouter prompt file not found; using built-in fallback prompt");
         this.promptSource = "built-in fallback";
         return "Correct only spelling, punctuation, grammar and obvious typos. Do not change language, meaning, names or terms. Return only the corrected text in <final-text>...</final-text>.";
     }

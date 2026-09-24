@@ -17,6 +17,9 @@
 hs_err_pid*
 replay_pid*
 
+# Local secrets
+.env
+
 # OS/editor temp files
 .DS_Store
 Thumbs.db

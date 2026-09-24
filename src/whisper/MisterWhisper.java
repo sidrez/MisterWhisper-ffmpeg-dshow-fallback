@@ -84,7 +84,7 @@ public class MisterWhisper implements NativeKeyListener {
     private static final long HOTKEY_REPEAT_SUPPRESS_MS = 150;
 
     private Preferences prefs;
-    private final MistralTextPostProcessor textPostProcessor = new MistralTextPostProcessor();
+    private final OpenRouterTextPostProcessor textPostProcessor = new OpenRouterTextPostProcessor();
 
     // Whisper
     private LocalWhisperCPP w;
