@@ -167,14 +167,16 @@ public class OpenRouterTextPostProcessor {
             return content;
         }
 
-        int start = content.indexOf(FINAL_TEXT_OPEN_TAG);
-        int end = content.lastIndexOf(FINAL_TEXT_CLOSE_TAG);
-        if (start >= 0 && end > start) {
-            start += FINAL_TEXT_OPEN_TAG.length();
-            return content.substring(start, end).trim();
+        if (!content.startsWith(FINAL_TEXT_OPEN_TAG) || !content.endsWith(FINAL_TEXT_CLOSE_TAG)) {
+            throw new IllegalStateException("OpenRouter response does not contain only a final-text tag");
         }
 
-        return content;
+        String finalText = content.substring(FINAL_TEXT_OPEN_TAG.length(),
+                content.length() - FINAL_TEXT_CLOSE_TAG.length());
+        if (finalText.contains(FINAL_TEXT_OPEN_TAG) || finalText.contains(FINAL_TEXT_CLOSE_TAG)) {
+            throw new IllegalStateException("OpenRouter response contains multiple final-text tags");
+        }
+        return finalText.trim();
     }
 
     private String readResponse(InputStream responseStream) throws IOException {
