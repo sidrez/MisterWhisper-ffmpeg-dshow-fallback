@@ -131,16 +131,16 @@ This compiles Java sources into `out\` and copies runtime DLLs into `out\win32-x
 
 ## 3) Run
 
-Direct Java command:
+Запуск через PowerShell согласует UTF-8 для вывода Java и консоли, сохраняя кавычки и другие символы в отладочном логе:
 ```
-java -cp "out;lib\jna.jar;lib\jnativehook-2.2.2.jar;lib\win32-x86-64.jar" whisper.MisterWhisper --window --debug
+powershell -ExecutionPolicy Bypass -File .\scripts\build-and-run.ps1 -Run
 ```
 
 Or via PowerShell helper function `mw`:
 ```powershell
 function mw {
     Set-Location "c:\Users\ar.sitdikov\OneDrive - ООО УК Унистрой\Work\Soft\Автоматизация\Python\Разное\Apps\MisterWhisper-ffmpeg-dshow-fallback"
-    java -cp "out;lib\jna.jar;lib\jnativehook-2.2.2.jar;lib\win32-x86-64.jar" whisper.MisterWhisper --window --debug
+    & .\scripts\build-and-run.ps1 -Run
 }
 ```
 

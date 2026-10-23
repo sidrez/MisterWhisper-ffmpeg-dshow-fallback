@@ -29,7 +29,7 @@ foreach ($dll in $requiredDlls) {
 
 New-Item -ItemType Directory -Force -Path $outRuntimeDir | Out-Null
 New-Item -ItemType Directory -Force -Path $outWhisperDir | Out-Null
-Copy-Item -LiteralPath (Join-Path $runtimeDir "*.dll") -Destination $outRuntimeDir -Force
+Get-ChildItem -LiteralPath $runtimeDir -Filter '*.dll' -File | Copy-Item -Destination $outRuntimeDir -Force
 # Needed for tray icon loading when running from classes in out/
 Copy-Item -Path (Join-Path $repoRoot "src\whisper\*.png") -Destination $outWhisperDir -Force
 Copy-Item -Path (Join-Path $repoRoot "src\whisper\*.txt") -Destination $outWhisperDir -Force
@@ -51,12 +51,19 @@ if ($Run) {
         $env:MISTERWHISPER_FFMPEG_DEVICE = $FfmpegDevice
         Write-Host "Using ffmpeg device override: $FfmpegDevice"
     }
-    & java -cp "out;$classpath" whisper.MisterWhisper --window --debug
-    if ($LASTEXITCODE -ne 0) {
-        throw "java exited with code $LASTEXITCODE"
+    $previousOutputEncoding = [Console]::OutputEncoding
+    try {
+        # Согласуем кодировку Java и консоли, чтобы сохранять кавычки и другие Unicode-символы.
+        [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+        & java '-Dstdout.encoding=UTF-8' '-Dstderr.encoding=UTF-8' -cp "out;$classpath" whisper.MisterWhisper --window --debug
+        if ($LASTEXITCODE -ne 0) {
+            throw "java exited with code $LASTEXITCODE"
+        }
+    } finally {
+        [Console]::OutputEncoding = $previousOutputEncoding
     }
 } else {
     Write-Host "Build complete."
     Write-Host "Run app with:"
-    Write-Host "java -cp ""out;$classpath"" whisper.MisterWhisper --window --debug"
+    Write-Host 'powershell -ExecutionPolicy Bypass -File .\scripts\build-and-run.ps1 -Run'
 }
